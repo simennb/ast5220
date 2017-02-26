@@ -8,5 +8,6 @@ program cmbspec
   call initialize_time_mod
 
   ! Output to file desired quantities here
+  !write(*,*) 'David is not here. We can do anything we want :-)'
 
 end program cmbspec

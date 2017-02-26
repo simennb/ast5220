@@ -4,10 +4,10 @@ FC        = ifort     # F90 compiler
 OPTIM     = -O3       # Optimization flags; set to -g -C for useful debug information
 
 # It should hopefully not be necessary to edit anything below
-FITSDIR = /mn/stornext/u2/hke/local/lib      # Directory containing libcfitsio.a
-LAPACK  = -L/mn/stornext/u2/hke/local/lib -llapack -lblas
-HEALPIX = -L/mn/stornext/u2/hke/local/lib -lhealpix
-HEALINC = -I/mn/stornext/u2/hke/local/include
+FITSDIR = /mn/stornext/u3/hke/local/lib      # Directory containing libcfitsio.a
+LAPACK  = -L/mn/stornext/u3/hke/local/lib -llapack -lblas
+HEALPIX = -L/mn/stornext/u3/hke/local/lib -lhealpix
+HEALINC = -I/mn/stornext/u3/hke/local/include
 OUTPUT  = cmbspec
 FFLAGS  = $(HEALPIX) $(LAPACK)
 
