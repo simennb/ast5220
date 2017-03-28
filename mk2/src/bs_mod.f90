@@ -107,7 +107,7 @@ contains
        do k = 1, kmax
           xnew = x+h
           if (xnew == x) then
-             write(*,*) 'step siez underflow in bsstep'
+             write(*,*) 'step size underflow in bsstep'
              stop
           end if
           call mmid(ysav,dydx, x, h, nseq(k), yseq, derivs)

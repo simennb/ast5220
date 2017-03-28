@@ -71,31 +71,32 @@ contains
     do i=2, n_eta
        eta(i) = eta(i-1)
        call odeint(eta(i:i), x_eta(i-1), x_eta(i), 1.d-10, x_step, 0.d0, eta_derivs, bsstep, output)
+       
     end do
   
     !       2) Spline the resulting function, using the provided "spline" routine in spline_1D_mod.f90
     call spline(x_eta, eta, 1.d30, 1.d30, eta2)
 
     ! Writing results to file
-    open(1, file='../results/x_eta.dat')
-    open(2, file='../results/x_H.dat')
-    open(3, file='../results/x_Omegas.dat')
-    open(4, file='../results/x_eta_uniform.dat') ! in order to verify the interpolation
-    do i=1, n_t
-       write(1,*) x_t(i), get_eta(x_t(i))
-       write(2,*) x_t(i), get_H(x_t(i))
+!    open(1, file='../results/x_eta.dat')
+!    open(2, file='../results/x_H.dat')
+!    open(3, file='../results/x_Omegas.dat')
+!    open(4, file='../results/x_eta_uniform.dat') ! in order to verify the interpolation
+!    do i=1, n_t
+!       write(1,*) x_t(i), get_eta(x_t(i))
+!       write(2,*) x_t(i), get_H(x_t(i))
 
-       H_scale = H_0**2/get_H(x_t(i))**2
-       write(3,'(4F10.7)') Omega_b*(exp(-3*x_t(i)))*H_scale, Omega_m*(exp(-3*x_t(i)))*H_scale, Omega_r*(exp(-4*x_t(i)))*H_scale, Omega_lambda*H_scale
-    end do
+!       H_scale = H_0**2/get_H(x_t(i))**2
+!       write(3,'(4F10.7)') Omega_b*(exp(-3*x_t(i)))*H_scale, Omega_m*(exp(-3*x_t(i)))*H_scale, Omega_r*(exp(-4*x_t(i)))*H_scale, Omega_lambda*H_scale
+!    end do
 
-    do i=1, n_eta
-       write(4,*) x_eta(i), eta(i)
-    end do
+!    do i=1, n_eta
+!       write(4,*) x_eta(i), eta(i)
+!    end do
 
-    do i=1, 4 ! closing files for good measure
-       close(i)
-    end do
+!    do i=1, 4 ! closing files for good measure
+!       close(i)
+!    end do
 
   end subroutine initialize_time_mod
   
@@ -107,7 +108,7 @@ contains
     real(dp), dimension(:), intent(out) :: dydx
     
     dydx = c/get_H_p(x)
-  end subroutine
+  end subroutine eta_derivs
 
   subroutine output(x, y)
     use healpix_types
@@ -143,10 +144,12 @@ contains
     implicit none
 
     real(dp), intent(in) :: x
-    real(dp)             :: get_dH_p, h
+    real(dp)             :: get_dH_p
+    ! No longer numerical derivative
+    get_dH_p = H_0**2.d0/2.d0*(-(Omega_b+Omega_m)*exp(-x)-2.d0*Omega_r*exp(-2.d0*x)+2.d0*Omega_lambda*exp(2.d0*x))/ get_H_p(x)
 
-    h = 0.001
-    get_dH_p = (get_H_p(x+h)-get_H_p(x-h))/(2.d0*h)
+!    h = 0.001
+ !   get_dH_p = (get_H_p(x+h)-get_H_p(x-h))/(2.d0*h)
 
   end function get_dH_p
 
