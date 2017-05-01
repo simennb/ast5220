@@ -8,7 +8,7 @@ module evolution_mod
 
   ! Accuracy parameters
   real(dp),     parameter, private :: a_init   = 1.d-8
-  real(dp),                private :: x_init   = log(a_init) ! try to check if this does not fuck up shit later
+  real(dp),                private :: x_init   = log(a_init)
   real(dp),     parameter, private :: k_min    = 0.1d0 * H_0 / c
   real(dp),     parameter, private :: k_max    = 1.d3  * H_0 / c
   integer(i4b), parameter          :: n_k      = 100
@@ -26,6 +26,9 @@ module evolution_mod
   real(dp), allocatable, dimension(:,:)   :: dPsi
   real(dp), allocatable, dimension(:,:)   :: dv_b
   real(dp), allocatable, dimension(:,:,:) :: dTheta
+
+  ! increasing x
+  real(dp), allocatable, dimension(:)     :: x_t2
 
   ! Fourier mode list
   real(dp), allocatable, dimension(:) :: ks
@@ -64,7 +67,6 @@ contains
 
 
 
-
   ! Routine for initializing and solving the Boltzmann and Einstein equations
   subroutine initialize_perturbation_eqns
     implicit none
@@ -74,9 +76,20 @@ contains
     ! Task: Initialize k-grid, ks; quadratic between k_min and k_max
     allocate(ks(n_k))
     do i = 1, n_k
-       ks(i) = k_min + (k_max - k_min)*(i/100.d0)**2
+       ks(i) = k_min + (k_max - k_min)*((i-1.d0)/99.d0)**2
     end do
 
+    ! increase size of x_t in order to see more
+    n_t = 1000
+    allocate(x_t2(n_t))
+    do i = 0, n_t
+       if (i <= 500) then
+          x_t2(i) = x_init + (i-1.d0)*(-log(1.d0+1630.4d0) - x_init)/(500.d0+1.d0)
+       else
+          x_t2(i) = x_t(i-500)
+       end if
+    end do
+    
     ! Allocate arrays for perturbation quantities
     allocate(Theta(0:n_t, 0:lmax_int, n_k))
     allocate(delta(0:n_t, n_k))
@@ -100,7 +113,7 @@ contains
        v_b(0,i)     = c*ks(i)/(2*get_H_p(x_init))*Phi(0,i)
        Theta(0,0,i) = 0.5d0*Phi(0,i)
        Theta(0,1,i) = -c*ks(i)/(6.d0*get_H_p(x_init))*Phi(0,i)
-       Theta(0,2,i) = -20.d0*c*ks(i)/(45.d0*get_H_p(x_init)*get_dtau(x_init))*Phi(0,i)
+       Theta(0,2,i) = -20.d0*c*ks(i)/(45.d0*get_H_p(x_init)*get_dtau(x_init))*Theta(0,1,i)
        do l = 3, lmax_int
           Theta(0,l,i) = -l/(2.d0*l+1)*c*ks(i)/(get_H_p(x_init)*get_dtau(x_init))*Theta(0,l-1,i)
        end do
@@ -141,27 +154,18 @@ contains
        y_tight_coupling(7) = Theta(0,1,k)
        
        ! Find the time to which tight coupling is assumed, 
-       ! and integrate equations to that time
        x_tc = get_tight_coupling_time(k_current)
 
-       ! Task: Integrate from x_init until the end of tight coupling, using
-       !       the tight coupling equations
-       call odeint(y_tight_coupling, x_init, x_tc, eps, h1, hmin, tight_coupling_derivs, bsstep, output)
-
-       ! Task: Set up variables for integration from the end of tight coupling 
-       ! until today
-       y(1:7) = y_tight_coupling(1:7) ! is (1:7) necessary?
-       y(8)   = -20.d0*c*k_current/(45.d0*get_H_p(x_tc)*get_dtau(x_tc))*y(7)
-       do l = 3, lmax_int
-          y(6+l) = -l/(2.d0*l+1.d0)*c*k_current/(get_H_p(x_tc)*get_dtau(x_tc))*y(6+l-1)
-       end do
-       
        do i = 1, n_t
-          ! Task: Integrate equations from tight coupling to today
-          if ((i==1) .and. (x_tc .ne. x_t(i))) then   ! ask if this is okay, or what i should do regarding x_t array
-             call odeint(y, x_tc, x_t(i), eps, h1, hmin, derivs, bsstep, output)
-          else if (i>1) then
-             call odeint(y, x_t(i-1), x_t(i), eps, h1, hmin, derivs, bsstep, output)
+          if (x_t2(i) <= x_tc) then
+             call odeint(y_tight_coupling, x_t2(i-1), x_t2(i), eps, h1, hmin, tight_coupling_derivs, bsstep, output)             
+             y(1:7) = y_tight_coupling(1:7) ! is (1:7) necessary?
+             y(8)   = -20.d0*c*k_current/(45.d0*get_H_p(x_tc)*get_dtau(x_tc))*y(7)
+             do l = 3, lmax_int
+                y(6+l) = -l/(2.d0*l+1.d0)*c*k_current/(get_H_p(x_tc)*get_dtau(x_tc))*y(6+l-1)
+             end do
+          else
+             call odeint(y, x_t2(i-1), x_t2(i), eps, h1, hmin, derivs, bsstep, output)
           end if
 
           ! Task: Store variables at time step i in global variables
@@ -182,7 +186,6 @@ contains
           dTheta(i,:,k) = dydx(6:6+lmax_int)
           dPsi(i,k)     = -dydx(5) - 12.d0*H_0**2/(c**2*k_current**2*exp(2.d0*x_t(i)))*Omega_r*(dydx(8)-2.d0*y(8))
        end do
-
     end do
 
     deallocate(y_tight_coupling)
@@ -202,17 +205,12 @@ contains
     integer(i4b)          :: i, n_test
     real(dp)              :: get_tight_coupling_time, x, x_start_rec
 
-    n_test = 1000 ! check if ok resolution
+    n_test = 1000
     x_start_rec = -log(1.d0+1630.4d0)
     x = x_init
-    ! go through different x values, check when if test gets true
     do i = 1, n_test
        x = x + (x_start_rec-x_init)/(n_test-1)
-       if (abs(c*k/(get_H_p(x)*get_dtau(x))) >= 0.1d0 .or. x >= x_start_rec) then
-          ! (abs(get_dtau(x)) <= 10.d0 .and.
-          ! WHAT THE FUCK IS dt??????????????????????????????????????????????????????
-          ! seems to be typo and should be dtau as per Callin p.6
-          ! just ask others about this, it makes little sense
+       if ((abs(c*k/(get_H_p(x)*get_dtau(x))) >= 0.1d0 .and. abs(get_dtau(x))<=10.d0) .or. ( x >= x_start_rec)) then
           get_tight_coupling_time = x
           exit
        end if
@@ -255,6 +253,7 @@ contains
     dydx(6) = -ckH_p*y(7) - dydx(5)
 
     ! y(4)  =  v_b(0,k)
+    ! Here be dragons
     q = ( -( (1.d0-2.d0*R)*dtau + (1.d0+R)*get_ddtau(x) )*(3.d0*y(7)+y(4)) - ckH_p*Psi + (1.d0-get_dH_p(x)/H_p)*ckH_p*(-y(6)+2.d0*Theta_2 ) - ckH_p*dydx(6) )/( (1.d0+R)*dtau+get_dH_p(x)/H_p - 1.d0 )
     dydx(4) = 1.d0/(1.d0+R)*(-y(4)-ckH_p*Psi+R*(q+ckH_p*(-y(6)+2.d0*Theta_2)-ckH_p*Psi))
     
@@ -303,7 +302,7 @@ contains
 
     ! y(l)  =  Theta(0,l,k) , 2 <= l < lmax_int
     do l = 2, lmax_int-1
-       dydx(6+l) = l*c*k_current/(2.d0*l+1.d0)*y(6+l-1) - (l+1.d0)*ckH_p/(2.d0*l+1.d0)*y(6+l+1) + dtau*(y(6+l) - 1.d0/10.d0*y(6+l)*abs(l==2)) ! check kronecker delta 1==1 -> -1
+       dydx(6+l) = l*ckH_p/(2.d0*l+1.d0)*y(6+l-1) - (l+1.d0)*ckH_p/(2.d0*l+1.d0)*y(6+l+1) + dtau*(y(6+l) - 1.d0/10.d0*y(6+l)*abs(l==2)) ! true = -1
     end do
     
     ! y(l)  =  Theta(0,l,k) , l = lmax_int
@@ -320,8 +319,8 @@ contains
     integer(i4b), allocatable, dimension(:)  :: kw
     allocate(kw(n_k))
     ! Need to pick 6 values of k to show the three regimes
-!    kw(1:6) = (/ 1, 21, 41, 60, 80, 100 /) ! linearly spaced for now
-    kw(1:6) = (/ 1, 5, 10, 40, 60, 100 /)
+    kw(1:6) = (/ 1, 12, 30, 40, 85, 100 /)
+!    kw(1:6) = (/ 1, 10, 30, 50, 75, 100 /)
 
     open(1, file='../results/phi.dat')
     open(2, file='../results/psi.dat')
@@ -329,27 +328,28 @@ contains
     open(4, file='../results/delta_b.dat')
     open(5, file='../results/v.dat')
     open(6, file='../results/v_b.dat')
-    open(7, file='../results/theta.dat') ! plot only for l=0, so write theta_0 to file
+    open(7, file='../results/theta.dat') ! l=0
     open(8, file='../results/k_values.dat')
-    ! write to file derivatives too? do we need plot of that?
+
     do i=1, 6
        write(8,*) ks(i), kw(i)
     end do
 
     do i=1, n_t
-       write(1,'(7F20.7)') x_t(i),Phi(i,kw(1)),Phi(i,kw(2)),Phi(i,kw(3)),Phi(i,kw(4)),Phi(i,kw(5)),Phi(i,kw(6))
-       write(2,'(7F20.7)') x_t(i),Psi(i,kw(1)),Psi(i,kw(2)),Psi(i,kw(3)),Psi(i,kw(4)),Psi(i,kw(5)),Psi(i,kw(6))
-       write(3,'(7F20.7)') x_t(i),delta(i,kw(1)),delta(i,kw(2)),delta(i,kw(3)),delta(i,kw(4)),delta(i,kw(5)),delta(i,kw(6))
-       write(4,'(7F20.7)') x_t(i),delta_b(i,kw(1)),delta_b(i,kw(2)),delta_b(i,kw(3)),delta_b(i,kw(4)),delta_b(i,kw(5)),delta_b(i,kw(6))
-       write(5,'(7F20.7)') x_t(i),v(i,kw(1)),v(i,kw(2)),v(i,kw(3)),v(i,kw(4)),v(i,kw(5)),v(i,kw(6))
-       write(6,'(7F20.7)') x_t(i),v_b(i,kw(1)),v_b(i,kw(2)),v_b(i,kw(3)),v_b(i,kw(4)),v_b(i,kw(5)),v_b(i,kw(6))
-       write(7,'(7F20.7)') x_t(i),Theta(i,0,kw(1)),Theta(i,0,kw(2)),Theta(i,0,kw(3)),Theta(i,0,kw(4)),Theta(i,0,kw(5)),Theta(i,0,kw(6))
+       write(1,'(7F20.7)') x_t2(i),Phi(i,kw(1)),Phi(i,kw(2)),Phi(i,kw(3)),Phi(i,kw(4)),Phi(i,kw(5)),Phi(i,kw(6))
+       write(2,'(7F20.7)') x_t2(i),Psi(i,kw(1)),Psi(i,kw(2)),Psi(i,kw(3)),Psi(i,kw(4)),Psi(i,kw(5)),Psi(i,kw(6))
+       write(3,'(7F20.7)') x_t2(i),delta(i,kw(1)),delta(i,kw(2)),delta(i,kw(3)),delta(i,kw(4)),delta(i,kw(5)),delta(i,kw(6))
+       write(4,'(7F20.7)') x_t2(i),delta_b(i,kw(1)),delta_b(i,kw(2)),delta_b(i,kw(3)),delta_b(i,kw(4)),delta_b(i,kw(5)),delta_b(i,kw(6))
+       write(5,'(7F20.7)') x_t2(i),v(i,kw(1)),v(i,kw(2)),v(i,kw(3)),v(i,kw(4)),v(i,kw(5)),v(i,kw(6))
+       write(6,'(7F20.7)') x_t2(i),v_b(i,kw(1)),v_b(i,kw(2)),v_b(i,kw(3)),v_b(i,kw(4)),v_b(i,kw(5)),v_b(i,kw(6))
+       write(7,'(7F20.7)') x_t2(i),Theta(i,0,kw(1)),Theta(i,0,kw(2)),Theta(i,0,kw(3)),Theta(i,0,kw(4)),Theta(i,0,kw(5)),Theta(i,0,kw(6))
     end do
 
     ! close files
     do i=1, 8
        close(i)
     end do
+    deallocate(kw)
 
   end subroutine write_to_file_mk3
 

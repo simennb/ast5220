@@ -13,7 +13,7 @@ FFLAGS  = $(HEALPIX) $(LAPACK)
 
 # List of source files to be compiled
 OBJS    = math_tools.o spline_1D_mod.o rk_mod.o bs_mod.o ode_solver.o \
-	  params.o time_mod.o rec_mod.o cmbspec.o
+	  params.o time_mod.o rec_mod.o evolution_mod.o cmbspec.o
 
 # Linking stage
 cmbspec: $(OBJS)
