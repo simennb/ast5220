@@ -1,4 +1,5 @@
 # compiled files:
+*.mod
 *.o
 *.so
 *.a
