@@ -4,11 +4,12 @@ module evolution_mod
   use time_mod
   use ode_solver
   use rec_mod
+  use spline_2D_mod
   implicit none
 
   ! Accuracy parameters
   real(dp),     parameter, private :: a_init   = 1.d-8
-  real(dp),                private :: x_init   = log(a_init) ! try to check if this does not fuck up shit later
+  real(dp),                private :: x_init   = log(a_init)
   real(dp),     parameter, private :: k_min    = 0.1d0 * H_0 / c
   real(dp),     parameter, private :: k_max    = 1.d3  * H_0 / c
   integer(i4b), parameter          :: n_k      = 100
@@ -44,28 +45,70 @@ contains
   subroutine get_hires_source_function(k, x, S)
     implicit none
 
-    real(dp), pointer, dimension(:),   intent(out) :: k, x
-    real(dp), pointer, dimension(:,:), intent(out) :: S
+    ! pointer vs allocatable, whats the difference, and why was use pointer here?
+    real(dp), allocatable, dimension(:),   intent(inout) :: k, x ! why out, instead of in/inout????
+    real(dp), allocatable, dimension(:,:), intent(inout) :: S
 
-    integer(i4b) :: i, j
-    real(dp)     :: g, dg, ddg, tau, dt, ddt, H_p, dH_p, ddHH_p, Pi, dPi, ddPi
-    real(dp), allocatable, dimension(:,:) :: S_lores
+    integer(i4b) :: i, j, n_hires
+    real(dp)     :: g, dg, ddg, tau, dt, ddt, H_p, dH_p, ddHH_p, Pi, dPi, ddPi, xc, kc ! xc=x_current, kc=k_current
+    real(dp), allocatable, dimension(:,:)     :: S_lores
+    real(dp), allocatable, dimension(:,:,:,:) :: S_coeff
 
     ! Task: Output a pre-computed 2D array (over k and x) for the 
     !       source function, S(k,x). Remember to set up (and allocate) output 
     !       k and x arrays too. 
     !
+    allocate(S_lores(n_t, n_k))
+    allocate(S_coeff(4,4,n_t,n_k))  ! why what huh
+
+    n_hires = size(x)
+    do i = 1, n_hires  ! create hires x,k arrays
+       x(i) = x_t2(501) + (i-1.d0)*(0.d0 - x_t2(501))/(n_hires-1.d0) ! change 501 to 1 if i revert to x_t
+       k(i) = k_min + (k_max - k_min)*((i-1.d0)/(n_hires-1.d0))**2
+    end do
+    
     ! Substeps:
     !   1) First compute the source function over the existing k and x
     !      grids
+    do i = 1, n_t  !  STICK AROUND
+       xc = x_t2(i)
+       g     = get_g(xc)
+       dg    = get_dg(xc)
+       ddg   = get_ddg(xc)
+       tau   = get_tau(xc)
+       dt    = get_dtau(xc)
+       ddt   = get_ddtau(xc)
+       H_p   = get_H_p(xc)
+       dH_p  = get_dH_p(xc)
+       
+       do j = 1, n_k
+          kc = ks(j)
+          Pi    = Theta(i,2,j)
+          dPi   = dTheta(i,2,j)
+          ! old equation attempt in backup file
+
+          ! new attempt as per cmbspec_eqns document D:
+          ddPi = 2.d0*c*kc/(5.d0*H_p)*(-dH_p/H_p*Theta(i,1,j) + dTheta(i,1,j)) + 3.d0/10.d0*(ddt*Pi+dt*dPi) - 3.d0*c*kc/(5.d0*H_p)*(-dH_p/H_p*Theta(i,3,j) + dTheta(i,3,j))
+
+          ddHH_p = H_0**2/2.d0*( (Omega_b+Omega_m)*exp(-xc) + 4.d0*Omega_r*exp(-2.d0*xc) + 4.d0*Omega_lambda*exp(2.d0*xc) )
+
+          S_lores(i,j) = g*(Theta(i,0,j)+Psi(i,j)+Pi/4.d0) + exp(-tau)*(dPsi(i,j)-dPhi(i,j)) - 1.d0/(c*kc)*(dH_p*g*v_b(i,j)+H_p*dg*v_b(i,j)+H_p*g*dv_b(i,j)) + 3.d0/(4.d0*c**2*kc**2)*(ddHH_p*g*Pi + 3.d0*H_p*dH_p*(dg*Pi+g*dPi) + H_p**2*(ddg*Pi+2.d0*dg*dPi+g*ddPi))
+       end do
+    end do  !  CHILL
+
     !   2) Then spline this function with a 2D spline
+    call splie2_full_precomp(x_t2, ks, S_lores, S_coeff)
+
     !   3) Finally, resample the source function on a high-resolution uniform
     !      5000 x 5000 grid and return this, together with corresponding
     !      high-resolution k and x arrays
+    do i=1, n_hires
+       do j=1, n_hires
+          S(i,j) = splin2_full_precomp(x_t2, ks, S_coeff, x(i), k(j))
+       end do
+    end do
 
   end subroutine get_hires_source_function
-
-
 
 
   ! Routine for initializing and solving the Boltzmann and Einstein equations
@@ -82,15 +125,14 @@ contains
 
     ! increase size of x_t D:
     n_t = 1000
-    allocate(x_t2(n_t))
+    allocate(x_t2(0:n_t))
     do i = 0, n_t
        if (i <= 500) then
-          x_t2(i) = x_init + (i-1.d0)*(-log(1.d0+1630.4d0) - x_init)/(500.d0+1.d0)
+          x_t2(i) = x_init + i*(-log(1.d0+1630.4d0) - x_init)/(500.d0+1.d0)
        else
           x_t2(i) = x_t(i-500)
        end if
-    end do
-    
+    end do    
 
     ! Allocate arrays for perturbation quantities
     allocate(Theta(0:n_t, 0:lmax_int, n_k))
@@ -161,34 +203,24 @@ contains
 
        ! Task: Integrate from x_init until the end of tight coupling, using
        !       the tight coupling equations
-!       call odeint(y_tight_coupling, x_init, x_tc, eps, h1, hmin, tight_coupling_derivs, bsstep, output)
 
        ! Task: Set up variables for integration from the end of tight coupling 
        ! until today
-!       y(1:7) = y_tight_coupling(1:7) ! is (1:7) necessary?!       y(8)   = -20.d0*c*k_current/(45.d0*get_H_p(x_tc)*get_dtau(x_tc))*y(7)
-!       do l = 3, lmax_int
-!          y(6+l) = -l/(2.d0*l+1.d0)*c*k_current/(get_H_p(x_tc)*get_dtau(x_tc))*y(6+l-1)
-!       end do
 
        do i = 1, n_t
-          if (x_t2(i) <= x_tc) then
-             call odeint(y_tight_coupling, x_t2(i-1), x_t2(i), eps, h1, hmin, tight_coupling_derivs, bsstep, output)             
-             y(1:7) = y_tight_coupling(1:7) ! is (1:7) necessary?
-             y(8)   = -20.d0*c*k_current/(45.d0*get_H_p(x_tc)*get_dtau(x_tc))*y(7)
+          x1 = x_t2(i-1)
+          x2 = x_t2(i)
+          if (x2 <= x_tc) then
+             call odeint(y_tight_coupling, x1, x2, eps, h1, hmin, tight_coupling_derivs, bsstep, output)             
+             y(1:7) = y_tight_coupling(1:7)
+             y(8)   = -20.d0*c*k_current/(45.d0*get_H_p(x2)*get_dtau(x2))*y(7)
              do l = 3, lmax_int
-                y(6+l) = -l/(2.d0*l+1.d0)*c*k_current/(get_H_p(x_tc)*get_dtau(x_tc))*y(6+l-1)
+                y(6+l) = -l/(2.d0*l+1.d0)*c*k_current/(get_H_p(x2)*get_dtau(x2))*y(6+l-1)
              end do
           else
-             call odeint(y, x_t2(i-1), x_t2(i), eps, h1, hmin, derivs, bsstep, output)
+             ! Task: Integrate equations from tight coupling to today
+             call odeint(y, x1, x2, eps, h1, hmin, derivs, bsstep, output)
           end if
-
-
-          ! Task: Integrate equations from tight coupling to today
-!          if ((i==1) .and. (x_tc .ne. x_t(i))) then   !?
-!             call odeint(y, x_tc, x_t(i), eps, h1, hmin, derivs, bsstep, output)
-!          else if (i>1) then
-!             call odeint(y, x_t(i-1), x_t(i), eps, h1, hmin, derivs, bsstep, output)
-!          end if
 
           ! Task: Store variables at time step i in global variables
           delta(i,k)   = y(1)
@@ -199,14 +231,27 @@ contains
           do l = 0, lmax_int
              Theta(i,l,k) = y(6+l) 
           end do
-          Psi(i,k)     = -y(5)-12.d0*H_0**2/(c**2*k_current**2*exp(2.d0*x_t(i)))*Omega_r*y(8)
+          Psi(i,k)     = -y(5)-12.d0*H_0**2/(c**2*k_current**2*exp(2.d0*x2))*Omega_r*y(8)
 
           ! Task: Store derivatives that are required for C_l estimation
-          call derivs(x_t(i), y, dydx)
-          dPhi(i,k)     = dydx(5)
-          dv_b(i,k)     = dydx(4)
-          dTheta(i,:,k) = dydx(6:6+lmax_int)
-          dPsi(i,k)     = -dydx(5) - 12.d0*H_0**2/(c**2*k_current**2*exp(2.d0*x_t(i)))*Omega_r*(dydx(8)-2.d0*y(8))
+          !  fixed in milestone 4: actually store correct derivs in tight-coupling regime
+          if (x2 <= x_tc) then
+             call tight_coupling_derivs(x2, y, dydx)
+             dv_b(i,k)     = dydx(4)
+             dPhi(i,k)     = dydx(5)
+             dTheta(i,0,k) = dydx(6)
+             dTheta(i,1,k) = dydx(7)
+             dTheta(i,2,k) = 20.d0*c*k_current*Theta(i,1,k)/(45.d0*get_H_p(x2)*get_dtau(x2))*(get_dH_p(x2)/get_H_p(x2)+get_ddtau(x2)/get_dtau(x2)-dTheta(i,1,k)/Theta(i,1,k))
+             do l = 3, lmax_int
+                dTheta(i,l,k) = l*c*k_current*Theta(i,l-1,k)/((2.d0*l+1.d0)*get_H_p(x2)*get_dtau(x2))*(get_dH_p(x2)/get_H_p(x2)+get_ddtau(x2)/get_dtau(x2)-dTheta(i,l-1,k)/Theta(i,l-1,k))
+             end do
+          else
+             call derivs(x2, y, dydx)
+             dv_b(i,k)     = dydx(4)
+             dPhi(i,k)     = dydx(5)
+             dTheta(i,:,k) = dydx(6:6+lmax_int)
+          end if
+          dPsi(i,k)     = -dydx(5) - 12.d0*H_0**2/(c**2*k_current**2*exp(2.d0*x2))*Omega_r*(dydx(8)-2.d0*y(8))
        end do
     end do
 

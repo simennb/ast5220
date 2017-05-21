@@ -19,7 +19,7 @@ module params
 !  real(dp), parameter :: Omega_nu     = 8.3d-5 - Omega_r
   real(dp), parameter :: Omega_lambda = 1.d0 - Omega_m - Omega_b - Omega_r - Omega_nu
   real(dp), parameter :: T_0          = 2.725d0
-  real(dp), parameter :: n_s          = 1.d0
+  real(dp), parameter :: n_s          = 0.96d0
   real(dp), parameter :: A_s          = 1.d0
   real(dp), parameter :: h0           = 0.7d0
   real(dp), parameter :: H_0          = h0 * 100.d0 * 1.d3 / Mpc
