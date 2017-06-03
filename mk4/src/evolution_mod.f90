@@ -45,12 +45,11 @@ contains
   subroutine get_hires_source_function(k, x, S)
     implicit none
 
-    ! pointer vs allocatable, whats the difference, and why was use pointer here?
-    real(dp), allocatable, dimension(:),   intent(inout) :: k, x ! why out, instead of in/inout????
+    real(dp), allocatable, dimension(:),   intent(inout) :: k, x
     real(dp), allocatable, dimension(:,:), intent(inout) :: S
 
-    integer(i4b) :: i, j, n_hires
-    real(dp)     :: g, dg, ddg, tau, dt, ddt, H_p, dH_p, ddHH_p, Pi, dPi, ddPi, xc, kc ! xc=x_current, kc=k_current
+    integer(i4b) :: i, j, n_hires, ii
+    real(dp)     :: g, dg, ddg, tau, dt, ddt, H_p, dH_p, ddHH_p, Pi, dPi, ddPi, xc, kc
     real(dp), allocatable, dimension(:,:)     :: S_lores
     real(dp), allocatable, dimension(:,:,:,:) :: S_coeff
 
@@ -58,20 +57,21 @@ contains
     !       source function, S(k,x). Remember to set up (and allocate) output 
     !       k and x arrays too. 
     !
-    allocate(S_lores(n_t, n_k))
-    allocate(S_coeff(4,4,n_t,n_k))  ! why what huh
+    allocate(S_lores(1000, n_k))
+    allocate(S_coeff(4,4,1000,n_k))  ! okay.....
 
     n_hires = size(x)
     do i = 1, n_hires  ! create hires x,k arrays
        x(i) = x_t2(501) + (i-1.d0)*(0.d0 - x_t2(501))/(n_hires-1.d0) ! change 501 to 1 if i revert to x_t
-       k(i) = k_min + (k_max - k_min)*((i-1.d0)/(n_hires-1.d0))**2
+       k(i) = k_min + (k_max - k_min)*((i-1.d0)/(n_hires-1.d0))!**2
     end do
     
     ! Substeps:
     !   1) First compute the source function over the existing k and x
     !      grids
-    do i = 1, n_t  !  STICK AROUND
-       xc = x_t2(i)
+    do i = 1, n_t!500!n_t  !  STICK AROUND
+       ii    = i !500+i ! why did i ever expand the x-grid :/
+       xc    = x_t2(i)
        g     = get_g(xc)
        dg    = get_dg(xc)
        ddg   = get_ddg(xc)
@@ -82,17 +82,16 @@ contains
        dH_p  = get_dH_p(xc)
        
        do j = 1, n_k
-          kc = ks(j)
-          Pi    = Theta(i,2,j)
-          dPi   = dTheta(i,2,j)
-          ! old equation attempt in backup file
+          kc    = ks(j)
+          Pi    = Theta(ii,2,j)
+          dPi   = dTheta(ii,2,j)
 
-          ! new attempt as per cmbspec_eqns document D:
-          ddPi = 2.d0*c*kc/(5.d0*H_p)*(-dH_p/H_p*Theta(i,1,j) + dTheta(i,1,j)) + 3.d0/10.d0*(ddt*Pi+dt*dPi) - 3.d0*c*kc/(5.d0*H_p)*(-dH_p/H_p*Theta(i,3,j) + dTheta(i,3,j))
+          ! new attempt as per cmbspec_eqns document (with typos fixed) D:
+          ddPi  = 2.d0*c*kc/(5.d0*H_p)*(-dH_p/H_p*Theta(ii,1,j) + dTheta(ii,1,j)) + 3.d0/10.d0*(ddt*Pi+dt*dPi) - 3.d0*c*kc/(5.d0*H_p)*(-dH_p/H_p*Theta(ii,3,j) + dTheta(ii,3,j))
 
           ddHH_p = H_0**2/2.d0*( (Omega_b+Omega_m)*exp(-xc) + 4.d0*Omega_r*exp(-2.d0*xc) + 4.d0*Omega_lambda*exp(2.d0*xc) )
 
-          S_lores(i,j) = g*(Theta(i,0,j)+Psi(i,j)+Pi/4.d0) + exp(-tau)*(dPsi(i,j)-dPhi(i,j)) - 1.d0/(c*kc)*(dH_p*g*v_b(i,j)+H_p*dg*v_b(i,j)+H_p*g*dv_b(i,j)) + 3.d0/(4.d0*c**2*kc**2)*(ddHH_p*g*Pi + 3.d0*H_p*dH_p*(dg*Pi+g*dPi) + H_p**2*(ddg*Pi+2.d0*dg*dPi+g*ddPi))
+          S_lores(i,j) = g*(Theta(ii,0,j)+Psi(ii,j)+Pi/4.d0) + exp(-tau)*(dPsi(ii,j)-dPhi(ii,j)) - 1.d0/(c*kc)*(dH_p*g*v_b(ii,j)+H_p*dg*v_b(ii,j)+H_p*g*dv_b(ii,j)) + 3.d0/(4.d0*c**2*kc**2)*(ddHH_p*g*Pi + 3.d0*H_p*dH_p*(dg*Pi+g*dPi) + H_p**2*(ddg*Pi+2.d0*dg*dPi+g*ddPi))
        end do
     end do  !  CHILL
 
@@ -294,12 +293,14 @@ contains
     real(dp),               intent(in)  :: x
     real(dp), dimension(:), intent(in)  :: y
     real(dp), dimension(:), intent(out) :: dydx
-    real(dp)                            :: Psi, Theta_2, H_p, a, R, q, dtau, ckH_p
+    real(dp)                            :: Psi, Theta_2, H_p, a, R, q, dtau, ckH_p, dH_p, ddtau
 
     ! Initializing some variables to be using in computing derivatives
     H_p     = get_H_p(x)
+    dH_p    = get_dH_p(x)
     a       = exp(x)
     dtau    = get_dtau(x)
+    ddtau   = get_ddtau(x)
     R       = 4.d0*Omega_r/(3.d0*Omega_b*a)
     ckH_p   = c*k_current/H_p
     Theta_2 = -20.d0*ckH_p/(45.d0*dtau)*y(7)
@@ -321,7 +322,7 @@ contains
     dydx(6) = -ckH_p*y(7) - dydx(5)
 
     ! y(4)  =  v_b(0,k)
-    q = ( -( (1.d0-2.d0*R)*dtau + (1.d0+R)*get_ddtau(x) )*(3.d0*y(7)+y(4)) - ckH_p*Psi + (1.d0-get_dH_p(x)/H_p)*ckH_p*(-y(6)+2.d0*Theta_2 ) - ckH_p*dydx(6) )/( (1.d0+R)*dtau+get_dH_p(x)/H_p - 1.d0 )
+    q = ( -( (1.d0-2.d0*R)*dtau + (1.d0+R)*ddtau )*(3.d0*y(7)+y(4)) - ckH_p*Psi + (1.d0-dH_p/H_p)*ckH_p*(-y(6)+2.d0*Theta_2 ) - ckH_p*dydx(6) )/( (1.d0+R)*dtau+dH_p/H_p - 1.d0 )
     dydx(4) = 1.d0/(1.d0+R)*(-y(4)-ckH_p*Psi+R*(q+ckH_p*(-y(6)+2.d0*Theta_2)-ckH_p*Psi))
     
     ! y(7)  =  Theta(0,1,k)
@@ -335,11 +336,12 @@ contains
     real(dp),               intent(in)  :: x
     real(dp), dimension(:), intent(in)  :: y
     real(dp), dimension(:), intent(out) :: dydx
-    real(dp)                            :: Psi, H_p, a, R, dtau, ckH_p
+    real(dp)                            :: Psi, H_p, a, R, dtau, ckH_p, eta
     integer(i4b)                        :: l
 
     ! Initializing some variables to be using in computing derivatives
     H_p     = get_H_p(x)
+    eta     = get_eta(x)
     a       = exp(x)
     dtau    = get_dtau(x)
     ckH_p   = c*k_current/H_p
@@ -371,10 +373,15 @@ contains
     do l = 2, lmax_int-1
        dydx(6+l) = l*ckH_p/(2.d0*l+1.d0)*y(6+l-1) - (l+1.d0)*ckH_p/(2.d0*l+1.d0)*y(6+l+1) + dtau*(y(6+l) - 1.d0/10.d0*y(6+l)*abs(l==2))
     end do
+
+   ! dydx(8) = 2.d0*ckH_p/5.d0*y(7) - 3.d0*ckH_p/5.d0*y(9) + dtau*(y(8) - 1.d0/10.d0*y(8))
+    !do l = 3, lmax_int-1
+     !  dydx(6+l) = l*ckH_p/(2.d0*l+1.d0)*y(6+l-1) - (l+1.d0)*ckH_p/(2.d0*l+1.d0)*y(6+l+1) + dtau*(y(6+l))
+    !end do
     
     ! y(l)  =  Theta(0,l,k) , l = lmax_int
     ! using that fortran for some reason increments l once more as do loop ends
-    dydx(6+l) = ckH_p*y(6+l-1) - c*(l+1.d0)/(H_p*get_eta(x))*y(6+l) + dtau*y(6+l)
+    dydx(6+l) = ckH_p*y(6+l-1) - c*(l+1.d0)/(H_p*eta)*y(6+l) + dtau*y(6+l)
 
   end subroutine derivs
 

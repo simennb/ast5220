@@ -10,7 +10,7 @@ contains
   subroutine compute_cls
     implicit none
 
-    integer(i4b) :: i, j, l, l_num, x_num, n_spline, n_hires, n_cl, m ! HEY CHRISTMAS TREE
+    integer(i4b) :: i, j, l, l_num, x_num, n_spline, n_hires, n_cl, m, i_rec ! HEY CHRISTMAS TREE
     real(dp)     :: dx, S_func, j_func, z, eta, eta0, x0, x_min, x_max, d, e
     integer(i4b), allocatable, dimension(:)       :: ls
     real(dp),     allocatable, dimension(:)       :: integrand
@@ -87,7 +87,7 @@ contains
 
     ! write integrand to file to check
     open(1,file='../results/integrand.dat')
-    j = 2916
+    j = locate_dp(k_hires,340.d0*H_0/c) ! locating 340*H_0/c in k array
     l = 17
     do i = 1, n_hires
        integrand(i) = S(i,j)*splint(z_spline,j_l(:,l),j_l2(:,l), k_hires(j)*(get_eta(0.d0)-get_eta(x_hires(i)))) 
@@ -96,22 +96,32 @@ contains
 
     ! Overall task: Compute the C_l's for each given l
     allocate(Theta(l_num,n_hires))
-    allocate(int_arg(n_hires)) ! i dont know what im doing
+    allocate(int_arg(n_hires))
     allocate(cls(l_num))
     allocate(cls2(l_num))
     allocate(x_lores(n_hires/10)) ! creating low-res x grid for fast Theta-integration
-    do l = 1, l_num
 
+    ! locate end of recombination
+    i_rec = locate_dp(x_hires, -log(1.d0+614.2d0))
+!    write(*,*) i_rec
+ !   stop
+    do l = 1, l_num
        ! Task: Compute the transfer function, Theta_l(k)
        do j = 1, n_hires
           ! Compute integrand for current k
           do i = 1, n_hires/10
-             m = 1 + (i-1)*(n_hires-1)/(n_hires/10-1) ! i just wanna speed up integration, ok
+             if (i<=300) then
+                m = 1 + (i-1)*(i_rec-1)/(300-1) ! i just wanna speed up the integration
+             end if
+             if (i>=300) then
+                m = i_rec + (i-301)*(n_hires-i_rec)/(199)
+             end if
+
              x_lores(i) = x_hires(m)
              integrand(i)=S(m,j)*splint(z_spline,j_l(:,l),j_l2(:,l),k_hires(j)*(get_eta(0.d0)-get_eta(x_hires(m)))) 
           end do
-
-          ! integrate with trapezoidal, maybe improve later
+          
+          ! integrate with trapezoidal, maybe improve later    EDIT: no
           call trapz(x_lores, integrand(1:500), Theta(l,j))
 
        end do
@@ -125,22 +135,21 @@ contains
        ! Task: Store C_l in an array. Optionally output to file
        cls(l) = integral*ls(l)*(ls(l)+1.d0)/(2.d0*pi)
 
-       write(*,*) ls(l), cls(l)
+       write(*,*) ls(l), cls(l) ! writing mostly so I know how far the program has come
 
        ! write C_l integrand to file
-       ! TODO: fix why plot is wrong
        if (ls(l) == 2) then
-          call write_cl_int(ls(l), c*k_hires/H_0, Theta(l,:)**2/k_hires
+          call write_cl_int(ls(l), c*k_hires/H_0, ls(l)*(ls(l)+1.d0)*Theta(l,:)**2/(c*k_hires/H_0))
        else if (ls(l) == 50) then
-          call write_cl_int(ls(l), c*k_hires/H_0, Theta(l,:)**2/k_hires
+          call write_cl_int(ls(l), c*k_hires/H_0, ls(l)*(ls(l)+1.d0)*Theta(l,:)**2/(c*k_hires/H_0))
        else if (ls(l) == 200) then
-          call write_cl_int(ls(l), c*k_hires/H_0, Theta(l,:)**2/k_hires
+          call write_cl_int(ls(l), c*k_hires/H_0, ls(l)*(ls(l)+1.d0)*Theta(l,:)**2/(c*k_hires/H_0))
        else if (ls(l) == 500) then
-          call write_cl_int(ls(l), c*k_hires/H_0, Theta(l,:)**2/k_hires
+          call write_cl_int(ls(l), c*k_hires/H_0, ls(l)*(ls(l)+1.d0)*Theta(l,:)**2/(c*k_hires/H_0))
        else if (ls(l) == 800) then
-          call write_cl_int(ls(l), c*k_hires/H_0, Theta(l,:)**2/k_hires
+          call write_cl_int(ls(l), c*k_hires/H_0, ls(l)*(ls(l)+1.d0)*Theta(l,:)**2/(c*k_hires/H_0))
        else if (ls(l) == 1200) then
-          call write_cl_int(ls(l), c*k_hires/H_0, Theta(l,:)**2/k_hires
+          call write_cl_int(ls(l), c*k_hires/H_0, ls(l)*(ls(l)+1.d0)*Theta(l,:)**2/(c*k_hires/H_0))
        end if
 
     end do
@@ -148,7 +157,7 @@ contains
     ! Task: Spline C_l's found above, and output smooth C_l curve for each integer l
     n_cl = ls(l_num)-1 ! 1999
     allocate(ls_dp(l_num))
-    allocate(ls_hires(ls(l_num)-1)) ! 1199 different l's, could use n_hires for 5k values, but maybe overkill
+    allocate(ls_hires(ls(l_num)-1)) ! 1199 different l's for unit stepsiez
     allocate(cls_hires(ls(l_num)-1))
     
     do l = 1, l_num
@@ -162,7 +171,8 @@ contains
     end do
 
     ! Write C_l's to file
-    open(20,file='../results/cl.dat') ! maybe add model parameters to file name for when changing
+    open(20,file='../results/cl.dat')
+    write(20,'(5E20.5)') n_s, h0, Omega_m, Omega_b, Omega_r  
     do i = 1, ls(l_num)-1
        write(20,'(2E20.8)') ls_hires(i), cls_hires(i)
     end do
@@ -171,11 +181,12 @@ contains
   end subroutine compute_cls
 
 
-  subroutine trapz(x,y,integral)
+  subroutine trapz(x,y,integral) ! Its a trap!
     implicit none
     real(dp), dimension(:), intent(in)  :: x,y
     real(dp),               intent(out) :: integral
     integer(i4b)                        :: n, i
+    real(dp)                            :: h
 
     if (size(x) .ne. size(y)) then
        write(*,*) 'x and y does not have same shape'
@@ -184,19 +195,20 @@ contains
 
     integral = 0.d0
     n = size(x)
+    h = (x(n) - x(1))/n ! apparently k was supposed to be evenly distributed
     do i=1, n-1
-       integral = integral + (x(i+1)-x(i))*(y(i+1)+y(i))/2.d0
+       integral = integral + h*(y(i+1)+y(i))/2.d0
     end do
 
   end subroutine trapz
 
-
+  ! actually working now
   subroutine write_cl_int(l, ckH0, cls_int)
     implicit none
     integer(i4b),            intent(in) :: l
-    real(dp), dimension(:), intent(in) :: ckH0, cls_int
-    integer(i4b)                       :: n, i
-    character(len=128)                 :: filename, str1, str2, str3
+    real(dp), dimension(:),  intent(in) :: ckH0, cls_int
+    integer(i4b)                        :: n, i
+    character(len=128)                  :: filename, str1, str2, str3
     if (size(ckH0) .ne. size(cls_int)) then
        write(*,*) 'ckH0 and cls_int does not have same shape'
        return
@@ -211,7 +223,7 @@ contains
     
     open(30,file=filename)
     do i = 1, n
-       write(30,'(2E20.8E4)') ckH0(i), cls_int(i)
+       write(30,'(*(2X, ES14.6E3))') ckH0(i), cls_int(i)
     end do
     close(30)
   end subroutine write_cl_int
